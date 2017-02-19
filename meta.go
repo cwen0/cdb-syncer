@@ -48,7 +48,7 @@ type Meta interface {
 
 // For binlog filename + Pos.
 type Position struct {
-	BinlogFile string
+	BinlogName string
 	Pos        uint64
 }
 
@@ -88,7 +88,7 @@ func (lm *LocalMeta) Save(pos Position, force bool) error {
 	lm.Lock()
 	defer lm.Unlock()
 
-	lm.BinlogName = pos.Name
+	lm.BinlogName = pos.BinlogName
 	lm.BinlogPos = pos.Pos
 
 	if force {
@@ -117,7 +117,7 @@ func (lm *LocalMeta) Pos() Position {
 	lm.RLock()
 	defer lm.RUnlock()
 
-	return Position{Name: lm.BinlogName, Pos: lm.BinlogPos}
+	return Position{BinlogName: lm.BinlogName, Pos: lm.BinlogPos}
 }
 
 // Check implements Meta.Check interface.
@@ -134,5 +134,5 @@ func (lm *LocalMeta) Check() bool {
 
 func (lm *LocalMeta) String() string {
 	pos := lm.Pos()
-	return fmt.Sprintf("binlog name = %s, binlog pos = %d", pos.Name, pos.Pos)
+	return fmt.Sprintf("binlog name = %s, binlog pos = %d", pos.BinlogName, pos.Pos)
 }

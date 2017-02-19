@@ -18,246 +18,234 @@ import (
 	"database/sql/driver"
 	"fmt"
 	"hash/crc32"
-	"strconv"
 	"strings"
 	"time"
 
+	pbinlog "github.com/cwen0/cdb-syncer/protocol"
 	"github.com/go-sql-driver/mysql"
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
-	"github.com/pingcap/tidb/ast"
 	tddl "github.com/pingcap/tidb/ddl"
 	"github.com/pingcap/tidb/infoschema"
 	tmysql "github.com/pingcap/tidb/mysql"
-	"github.com/pingcap/tidb/parser"
 	"github.com/pingcap/tidb/terror"
 )
 
-type opType byte
-
-const (
-	insert = iota + 1
-	update
-	del
-	ddl
-	xid
-)
-
 type job struct {
-	tp    opType
+	tp    pbinlog.BinlogType
 	sql   string
-	args  []string
+	args  []interface{}
 	key   string
 	retry bool
 	pos   Position
 }
 
-func newJob(tp opType, sql string, args []string, key string, retry bool, pos Position) *job {
+func newJob(tp pbinlog.BinlogType, sql string, args []interface{}, key string, retry bool, pos Position) *job {
 	return &job{tp: tp, sql: sql, args: args, key: key, retry: retry, pos: pos}
 }
 
-type column struct {
-	idx      int
-	name     string
-	unsigned bool
-}
+//type column struct {
+//idx      int
+//name     string
+//unsigned bool
+//}
 
-type table struct {
-	schema string
-	name   string
+//type table struct {
+//schema string
+//name   string
 
-	columns      []*column
-	indexColumns []*column
-}
+//columns      []*column
+//indexColumns []*column
+//}
 
-func castUnsigned(data interface{}, unsigned bool) interface{} {
-	if !unsigned {
-		return data
-	}
+//func castUnsigned(data interface{}, unsigned bool) interface{} {
+//if !unsigned {
+//return data
+//}
 
-	switch v := data.(type) {
-	case int:
-		return uint(v)
-	case int8:
-		return uint8(v)
-	case int16:
-		return uint16(v)
-	case int32:
-		return uint32(v)
-	case int64:
-		return strconv.FormatUint(uint64(v), 10)
-	}
+//switch v := data.(type) {
+//case int:
+//return uint(v)
+//case int8:
+//return uint8(v)
+//case int16:
+//return uint16(v)
+//case int32:
+//return uint32(v)
+//case int64:
+//return strconv.FormatUint(uint64(v), 10)
+//}
 
-	return data
-}
+//return data
+//}
 
-func columnValue(value interface{}, unsigned bool) string {
-	castValue := castUnsigned(value, unsigned)
+//func columnValue(value interface{}, unsigned bool) string {
+//castValue := castUnsigned(value, unsigned)
 
-	var data string
-	switch v := castValue.(type) {
-	case nil:
-		data = "null"
-	case bool:
-		if v {
-			data = "1"
-		} else {
-			data = "0"
-		}
-	case int:
-		data = strconv.FormatInt(int64(v), 10)
-	case int8:
-		data = strconv.FormatInt(int64(v), 10)
-	case int16:
-		data = strconv.FormatInt(int64(v), 10)
-	case int32:
-		data = strconv.FormatInt(int64(v), 10)
-	case int64:
-		data = strconv.FormatInt(int64(v), 10)
-	case uint8:
-		data = strconv.FormatUint(uint64(v), 10)
-	case uint16:
-		data = strconv.FormatUint(uint64(v), 10)
-	case uint32:
-		data = strconv.FormatUint(uint64(v), 10)
-	case uint64:
-		data = strconv.FormatUint(uint64(v), 10)
-	case float32:
-		data = strconv.FormatFloat(float64(v), 'f', -1, 32)
-	case float64:
-		data = strconv.FormatFloat(float64(v), 'f', -1, 64)
-	case string:
-		data = v
-	case []byte:
-		data = string(v)
-	default:
-		data = fmt.Sprintf("%v", v)
-	}
+//var data string
+//switch v := castValue.(type) {
+//case nil:
+//data = "null"
+//case bool:
+//if v {
+//data = "1"
+//} else {
+//data = "0"
+//}
+//case int:
+//data = strconv.FormatInt(int64(v), 10)
+//case int8:
+//data = strconv.FormatInt(int64(v), 10)
+//case int16:
+//data = strconv.FormatInt(int64(v), 10)
+//case int32:
+//data = strconv.FormatInt(int64(v), 10)
+//case int64:
+//data = strconv.FormatInt(int64(v), 10)
+//case uint8:
+//data = strconv.FormatUint(uint64(v), 10)
+//case uint16:
+//data = strconv.FormatUint(uint64(v), 10)
+//case uint32:
+//data = strconv.FormatUint(uint64(v), 10)
+//case uint64:
+//data = strconv.FormatUint(uint64(v), 10)
+//case float32:
+//data = strconv.FormatFloat(float64(v), 'f', -1, 32)
+//case float64:
+//data = strconv.FormatFloat(float64(v), 'f', -1, 64)
+//case string:
+//data = v
+//case []byte:
+//data = string(v)
+//default:
+//data = fmt.Sprintf("%v", v)
+//}
 
-	return data
-}
+//return data
+//}
 
-func findColumn(columns []*column, indexColumn string) *column {
-	for _, column := range columns {
-		if column.name == indexColumn {
-			return column
-		}
-	}
+//func findColumn(columns []*column, indexColumn string) *column {
+//for _, column := range columns {
+//if column.name == indexColumn {
+//return column
+//}
+//}
 
-	return nil
-}
+//return nil
+//}
 
-func findColumns(columns []*column, indexColumns []string) []*column {
-	result := make([]*column, 0, len(indexColumns))
+//func findColumns(columns []*column, indexColumns []string) []*column {
+//result := make([]*column, 0, len(indexColumns))
 
-	for _, name := range indexColumns {
-		column := findColumn(columns, name)
-		if column != nil {
-			result = append(result, column)
-		}
-	}
+//for _, name := range indexColumns {
+//column := findColumn(columns, name)
+//if column != nil {
+//result = append(result, column)
+//}
+//}
 
-	return result
-}
+//return result
+//}
 
-func genColumnList(columns []*column) string {
-	var columnList []byte
-	for i, column := range columns {
-		name := fmt.Sprintf("`%s`", column.name)
-		columnList = append(columnList, []byte(name)...)
+//func genColumnList(columns []*column) string {
+//var columnList []byte
+//for i, column := range columns {
+//name := fmt.Sprintf("`%s`", column.name)
+//columnList = append(columnList, []byte(name)...)
 
-		if i != len(columns)-1 {
-			columnList = append(columnList, ',')
-		}
-	}
+//if i != len(columns)-1 {
+//columnList = append(columnList, ',')
+//}
+//}
 
-	return string(columnList)
-}
+//return string(columnList)
+//}
 
 func genHashKey(key string) uint32 {
 	return crc32.ChecksumIEEE([]byte(key))
 }
 
-func genKeyList(columns []*column, datas []interface{}) string {
-	values := make([]string, 0, len(datas))
-	for i, data := range datas {
-		values = append(values, columnValue(data, columns[i].unsigned))
-	}
+//func genKeyList(columns []*column, datas []interface{}) string {
+//values := make([]string, 0, len(datas))
+//for i, data := range datas {
+//values = append(values, columnValue(data, columns[i].unsigned))
+//}
 
-	return strings.Join(values, ",")
-}
+//return strings.Join(values, ",")
+//}
 
-func genColumnPlaceholders(length int) string {
-	values := make([]string, length, length)
-	for i := 0; i < length; i++ {
-		values[i] = "?"
-	}
-	return strings.Join(values, ",")
-}
+//func genColumnPlaceholders(length int) string {
+//values := make([]string, length, length)
+//for i := 0; i < length; i++ {
+//values[i] = "?"
+//}
+//return strings.Join(values, ",")
+//}
 
 func genPKey(rows []*pbinlog.Row) string {
 	var values []string
-	for row := range rows {
-		values = append(values, row.GetColumnValue)
+	for _, row := range rows {
+		values = append(values, row.GetColumnValue())
 	}
 	return strings.Join(values, ",")
 }
 
-func genInsertSQL(binlog pbinlog.Binlog) (string, string, []string, error) {
+func genInsertSQL(binlog pbinlog.Binlog) (string, string, []interface{}, error) {
 	var sql string
 	var values []string
 	sql += "replace into" + binlog.GetDbName() + "." + binlog.GetTableName() + "("
 	rows := binlog.GetRows()
-	for row := range rows {
+	for _, row := range rows {
 		sql += row.GetColumnName() + ","
 		values = append(values, row.GetColumnValue())
 	}
 	sql = sql[0:len(sql)-1] + ") values ("
-	for row := range rows {
+	for _, _ = range rows {
 		sql += "?,"
 	}
 	sql = sql[0:len(sql)-1] + ")"
 
-	return sql, binlog.GetTableName() + genPKey(binlog.GetPrimaryKey()), values, nil
+	return sql, binlog.GetTableName() + genPKey(binlog.GetPrimaryKey()), stringToInterface(values), nil
 }
 
-func genUpdateSQL(binlog pbinlog.Binlog) (string, string, []string, error) {
+func genUpdateSQL(binlog pbinlog.Binlog) (string, string, []interface{}, error) {
 	var sql string
 	var values []string
 	sql += "update " + binlog.GetDbName() + "." + binlog.GetTableName() + " set "
 	rows := binlog.GetRows()
-	for row := range rows {
+	for _, row := range rows {
 		sql += row.GetColumnName() + "=?,"
 		values = append(values, row.GetColumnValue())
 	}
 	sql = sql[0:len(sql)-1] + " where 1=1 "
-	for row := range binlog.GetPrimaryKey() {
+	for _, row := range binlog.GetPrimaryKey() {
 		sql += " and " + row.GetColumnName() + " = ? "
 		values = append(values, row.GetColumnValue())
 	}
-	return sql, binlog.GetTableName() + genPKey(binlog.GetPrimaryKey()), values, nil
+	return sql, binlog.GetTableName() + genPKey(binlog.GetPrimaryKey()), stringToInterface(values), nil
 }
 
-func genDeleteSQL(binlog pbinlog.Binlog) (string, string, []string, error) {
+func genDeleteSQL(binlog pbinlog.Binlog) (string, string, []interface{}, error) {
 	var sql string
 	var values []string
 	sql += "delete from " + binlog.GetDbName() + "." + binlog.GetTableName() + " where 1=1 "
-	for row := range binlog.GetPrimaryKey() {
+	for _, row := range binlog.GetPrimaryKey() {
 		sql += " and " + row.GetColumnName() + " = ? "
 		values = append(values, row.GetColumnValue())
 	}
-	return sql, binlog.GetTableName() + genPKey(binlog.GetPrimaryKey()), values, nil
+	return sql, binlog.GetTableName() + genPKey(binlog.GetPrimaryKey()), stringToInterface(values), nil
 }
 
-func genDdlSQL(binlog pbinlog.Binlog) (string, string, []string, error) {
+func genDdlSQL(binlog pbinlog.Binlog) (string, string, []interface{}, error) {
 	var sql string
 	sql += "use " + binlog.GetDbName() + ";"
 	rows := binlog.GetRows()
-	for row := range rows {
+	for _, row := range rows {
 		sql += row.GetSql() + ";"
 	}
-
-	return sql, "", "", nil
+	empty := make([]interface{}, 0)
+	return sql, "", empty, nil
 }
 
 func ignoreDDLError(err error) bool {
@@ -276,38 +264,6 @@ func ignoreDDLError(err error) bool {
 	default:
 		return false
 	}
-}
-
-func parserDDLTableName(sql string) (TableName, error) {
-	stmt, err := parser.New().ParseOneStmt(sql, "", "")
-	if err != nil {
-		return TableName{}, errors.Trace(err)
-	}
-
-	var res TableName
-	switch v := stmt.(type) {
-	case *ast.CreateDatabaseStmt:
-		res = genTableName(v.Name, "")
-	case *ast.DropDatabaseStmt:
-		res = genTableName(v.Name, "")
-	case *ast.CreateIndexStmt:
-		res = genTableName(v.Table.Schema.L, v.Table.Name.L)
-	case *ast.CreateTableStmt:
-		res = genTableName(v.Table.Schema.L, v.Table.Name.L)
-	case *ast.DropIndexStmt:
-		res = genTableName(v.Table.Schema.L, v.Table.Name.L)
-	case *ast.TruncateTableStmt:
-		res = genTableName(v.Table.Schema.L, v.Table.Name.L)
-	case *ast.DropTableStmt:
-		if len(v.Tables) != 1 {
-			return res, errors.Errorf("may resovle DDL sql failed")
-		}
-		res = genTableName(v.Tables[0].Schema.L, v.Tables[0].Name.L)
-	default:
-		return res, errors.Errorf("unkown DDL type")
-	}
-
-	return res, nil
 }
 
 func isRetryableError(err error) bool {

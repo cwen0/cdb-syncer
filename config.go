@@ -38,6 +38,7 @@ func NewConfig() *Config {
 	fs.StringVar(&cfg.LogFile, "log-file", "", "log file path")
 	fs.StringVar(&cfg.LogRotate, "log-rotate", "", "log file rotate type, hour/day")
 	fs.StringVar(&cfg.BinlogPath, "binlog-path", "", "binlog file path")
+	fs.StringVar(&cfg.BinlogNamePre, "binlog-name-pre", "binlog-", "binlog file prefix")
 
 	return cfg
 }
@@ -88,6 +89,8 @@ type Config struct {
 	Meta string `toml:"meta" json:"meta"`
 
 	BinlogPath string `toml:"binlog-path" json:"binlog-path"`
+
+	BinlogNamePre string `toml:"binlog-name-pre" json:"binlog-name-pre"`
 
 	// Ref: http://dev.mysql.com/doc/refman/5.7/en/replication-options-slave.html#option_mysqld_replicate-do-table
 	DoTables []TableName `toml:"replicate-do-table" json:"replicate-do-table"`

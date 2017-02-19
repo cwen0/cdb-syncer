@@ -22,7 +22,7 @@ type BinlogSyncer struct {
 
 type BinlogSyncerConfig struct {
 	BinlogPath    string
-	BinlogFilePre string
+	BinlogNamePre string
 }
 
 func NewBinlogSyncer(cfg *BinlogSyncerConfig) *BinlogSyncer {
@@ -30,27 +30,27 @@ func NewBinlogSyncer(cfg *BinlogSyncerConfig) *BinlogSyncer {
 	b := new(BinlogSyncer)
 	b.cfg = cfg
 	b.currentPos = Position{
-		BinlogFile: cfg.BinlogFilePre + string(fmt.Sprintf("%08d", 1)),
+		BinlogName: cfg.BinlogNamePre + string(fmt.Sprintf("%08d", 1)),
 		Pos:        uint64(1),
 	}
 	return b
 }
 
 func (b *BinlogSyncer) SetCurrentPos(pos Position) {
-	if pos.BinlogFile != "" {
-		b.currentPos.BinlogFile = pos.BinlogFile
+	if pos.BinlogName != "" {
+		b.currentPos.BinlogName = pos.BinlogName
 	}
 	b.currentPos.Pos = pos.Pos
 }
 
-func (b *BinlogSyncer) GetBinlog() ([]pbinlog.Binlog, error) {
+func (b *BinlogSyncer) GetBinlogs() ([]pbinlog.Binlog, error) {
 	var binlogAry []pbinlog.Binlog
 	var count int = 0
 	var err error
 Loop:
 	var file *os.File
 	for {
-		file, err = os.Open(b.cfg.BinlogPath + "/" + b.currentPos.BinlogFile)
+		file, err = os.Open(b.cfg.BinlogPath + "/" + b.currentPos.BinlogName)
 		if err != nil {
 			return binlogAry, errors.Trace(err)
 		}
@@ -62,7 +62,7 @@ Loop:
 		}
 
 		if int64(b.currentPos.Pos) == fileInfo.Size() {
-			isExist, nextBinlogFile, err := b.isExistNextBinlogFile()
+			isExist, nextBinlogName, err := b.isExistNextBinlogName()
 			if err != nil {
 				return binlogAry, errors.Trace(err)
 			}
@@ -70,11 +70,11 @@ Loop:
 				return binlogAry, nil
 			}
 			file.Close()
-			b.currentPos.BinlogFile = nextBinlogFile
+			b.currentPos.BinlogName = nextBinlogName
 			b.currentPos.Pos = 0
 			continue
 		} else if int64(b.currentPos.Pos) > fileInfo.Size() {
-			return binlogAry, errors.Errorf("Read binlogfile %s offset %d error", b.currentPos.BinlogFile, b.currentPos.Pos)
+			return binlogAry, errors.Errorf("Read binlogfile %s offset %d error", b.currentPos.BinlogName, b.currentPos.Pos)
 		}
 		break
 	}
@@ -111,7 +111,7 @@ Loop:
 		b.currentPos.Pos = offset + 4 + uint64(s)
 		binlogAry = append(binlogAry, binlog)
 		if fileIsEnd {
-			isExist, nextBinlogFile, err := b.isExistNextBinlogFile()
+			isExist, nextBinlogName, err := b.isExistNextBinlogName()
 			if err != nil {
 				return binlogAry, errors.Trace(err)
 			}
@@ -119,23 +119,23 @@ Loop:
 				return binlogAry, nil
 			}
 			file.Close()
-			b.currentPos.BinlogFile = nextBinlogFile
+			b.currentPos.BinlogName = nextBinlogName
 			b.currentPos.Pos = 0
-			break Loop
+			goto Loop
 		}
 	}
 	return binlogAry, nil
 }
 
-func (b *BinlogSyncer) isExistNextBinlogFile() (bool, string, error) {
-	numStr := strings.TrimPrefix(b.currentPos.BinlogFile, b.cfg.BinlogFilePre)
+func (b *BinlogSyncer) isExistNextBinlogName() (bool, string, error) {
+	numStr := strings.TrimPrefix(b.currentPos.BinlogName, b.cfg.BinlogNamePre)
 	num, err := strconv.Atoi(numStr)
 	if err != nil {
 		return false, "", errors.Trace(err)
 	}
-	nextBinlogFile := b.cfg.BinlogFilePre + fmt.Sprint("%08d", num+1)
-	if _, err = os.Stat(b.cfg.BinlogPath + "/" + nextBinlogFile); os.IsNotExist(err) {
+	nextBinlogName := b.cfg.BinlogNamePre + fmt.Sprint("%08d", num+1)
+	if _, err = os.Stat(b.cfg.BinlogPath + "/" + nextBinlogName); os.IsNotExist(err) {
 		return false, "", nil
 	}
-	return true, nextBinlogFile, nil
+	return true, nextBinlogName, nil
 }
