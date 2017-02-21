@@ -88,9 +88,9 @@ Loop:
 		if n == 0 {
 			return binlogAry, nil
 		}
-		//if err != nil || n != 8 {
-		//return binlogAry, errors.Trace(err)
-		//}
+		if err != nil || n != 8 {
+			return binlogAry, errors.Trace(err)
+		}
 		var s int64
 		buf := bytes.NewReader(sb)
 		err := binary.Read(buf, binary.BigEndian, &s)
