@@ -104,7 +104,9 @@ func genDeleteSQL(binlog pbinlog.Binlog) (string, string, []interface{}, error) 
 
 func genDdlSQL(binlog pbinlog.Binlog) (string, string, []interface{}, error) {
 	var sql string
-	sql += "use " + binlog.GetDbName() + ";"
+	if binlog.GetDbName() != "" {
+		sql += "use " + binlog.GetDbName() + ";"
+	}
 	rows := binlog.GetRows()
 	for _, row := range rows {
 		sql += row.GetSql() + ";"
