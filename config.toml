@@ -10,7 +10,7 @@ batch = 1
 
 pprof-addr = ":10081"
 
-binlog-path="/tmp"
+binlog-path="/home/cwen/temp/binlog"
 binlog-name-pre="binlog-"
 ##replicate-do-db priority over replicate-do-table if have same db name
 ##and we support regex expression , start with '~' declare use regex expression.
@@ -27,5 +27,5 @@ binlog-name-pre="binlog-"
 [to]
 host = "127.0.0.1"
 user = "root"
-password = ""
-port = 4000
+password = "000000"
+port = 3306

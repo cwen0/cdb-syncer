@@ -80,20 +80,26 @@ Loop:
 	}
 
 	for i := count; i < 100; i++ {
-		sb := make([]byte, 4)
+		sb := make([]byte, 8)
 		offset := b.currentPos.Pos
 		var fileIsEnd bool = false
 		var n int
 		n, err = file.ReadAt(sb, int64(offset))
-		if err != nil || n != 4 {
+		if n == 0 {
+			return binlogAry, nil
+		}
+		//if err != nil || n != 8 {
+		//return binlogAry, errors.Trace(err)
+		//}
+		var s int64
+		buf := bytes.NewReader(sb)
+		err := binary.Read(buf, binary.BigEndian, &s)
+		if err != nil {
 			return binlogAry, errors.Trace(err)
 		}
-		var s int
-		buf := bytes.NewReader(sb)
-		err = binary.Read(buf, binary.LittleEndian, &s)
 		data := make([]byte, s)
-		n, err = file.ReadAt(data, int64(offset+4))
-		if n != s {
+		n, err = file.ReadAt(data, int64(offset+8))
+		if n != int(s) {
 			return binlogAry, errors.Trace(err)
 		}
 		if err != nil {
@@ -102,13 +108,12 @@ Loop:
 			}
 			fileIsEnd = true
 		}
-		// in := bytes.NewReader(data)
 		binlog := pbinlog.Binlog{}
 		if err = proto.Unmarshal(data, &binlog); err != nil {
 			return binlogAry, errors.Trace(err)
 		}
 		count++
-		b.currentPos.Pos = offset + 4 + uint64(s)
+		b.currentPos.Pos = offset + 8 + uint64(s)
 		binlogAry = append(binlogAry, binlog)
 		if fileIsEnd {
 			isExist, nextBinlogName, err := b.isExistNextBinlogName()

@@ -284,7 +284,7 @@ func (s *Syncer) run() error {
 		}
 
 		if len(binlogArg) == 0 {
-			time.Sleep(2 * time.Minute)
+			time.Sleep(10 * time.Second)
 			continue
 		}
 

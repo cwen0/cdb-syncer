@@ -59,7 +59,7 @@ func genPKey(rows []*pbinlog.Row) string {
 func genInsertSQL(binlog pbinlog.Binlog) (string, string, []interface{}, error) {
 	var sql string
 	var values []string
-	sql += "replace into" + binlog.GetDbName() + "." + binlog.GetTableName() + "("
+	sql += "replace into " + binlog.GetDbName() + "." + binlog.GetTableName() + "("
 	rows := binlog.GetRows()
 	for _, row := range rows {
 		sql += row.GetColumnName() + ","
