@@ -157,7 +157,13 @@ func (s *Syncer) addJob(job *job) error {
 	wait := s.checkWait(job)
 	if wait {
 		s.jobWg.Wait()
-
+		for _, ch := range s.jobs {
+			for {
+				if len(ch) == 0 {
+					break
+				}
+			}
+		}
 		err := s.meta.Save(job.pos, true)
 		if err != nil {
 			return errors.Trace(err)

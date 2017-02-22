@@ -27,7 +27,7 @@ import (
 )
 
 var (
-	maxSaveTime = 30 * time.Second
+	maxSaveTime = 60 * time.Second
 )
 
 // Meta is the binlog meta information from sync source.
