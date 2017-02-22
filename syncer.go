@@ -264,7 +264,6 @@ func (s *Syncer) run() error {
 		return errors.Trace(err)
 	}
 
-	//s.genRegexMap()
 	s.start = time.Now()
 	s.lastTime = s.start
 	s.wg.Add(s.cfg.WorkerCount)
@@ -278,17 +277,27 @@ func (s *Syncer) run() error {
 	pos := s.meta.Pos()
 	s.syncer.SetCurrentPos(pos)
 	for {
-		binlogArg, err := s.syncer.GetBinlogs()
+		//ctx, cancel := context.WithTimeout(s.ctx, eventTimeout)
+		//binlogArg, pos, err := s.syncer.GetBinlogs(ctx)
+		//cancel()
+		//if err == context.Canceled {
+		//log.Infof("ready to quit! [%v]", pos)
+		//return nil
+		//} else if err == context.DeadlineExceeded {
+		//continue
+		//}
+		binlogAry, pos, err := s.syncer.GetBinlogs()
+
 		if err != nil {
 			return errors.Trace(err)
 		}
 
-		if len(binlogArg) == 0 {
+		if len(binlogAry) == 0 {
 			time.Sleep(10 * time.Second)
 			continue
 		}
 
-		for _, binlog := range binlogArg {
+		for _, binlog := range binlogAry {
 			switch binlog.GetType() {
 			case pbinlog.BinlogType_INSERT:
 				sql, pKey, args, err := genInsertSQL(binlog)
@@ -387,7 +396,6 @@ func (s *Syncer) Close() {
 	<-s.done
 
 	closeJobChans(s.jobs)
-
 	s.wg.Wait()
 
 	closeDBs(s.toDBs...)
