@@ -56,7 +56,7 @@ func genPKey(rows []*pbinlog.Row) string {
 	return strings.Join(values, ",")
 }
 
-func genInsertSQL(binlog pbinlog.Binlog) (string, string, []interface{}, error) {
+func genInsertSQL(binlog *pbinlog.Binlog) (string, string, []interface{}, error) {
 	var sql string
 	var values []string
 	sql += "replace into " + binlog.GetDbName() + "." + binlog.GetTableName() + "("
@@ -74,7 +74,7 @@ func genInsertSQL(binlog pbinlog.Binlog) (string, string, []interface{}, error) 
 	return sql, binlog.GetTableName() + genPKey(binlog.GetPrimaryKey()), stringToInterface(values), nil
 }
 
-func genUpdateSQL(binlog pbinlog.Binlog) (string, string, []interface{}, error) {
+func genUpdateSQL(binlog *pbinlog.Binlog) (string, string, []interface{}, error) {
 	var sql string
 	var values []string
 	sql += "update " + binlog.GetDbName() + "." + binlog.GetTableName() + " set "
@@ -91,7 +91,7 @@ func genUpdateSQL(binlog pbinlog.Binlog) (string, string, []interface{}, error) 
 	return sql, binlog.GetTableName() + genPKey(binlog.GetPrimaryKey()), stringToInterface(values), nil
 }
 
-func genDeleteSQL(binlog pbinlog.Binlog) (string, string, []interface{}, error) {
+func genDeleteSQL(binlog *pbinlog.Binlog) (string, string, []interface{}, error) {
 	var sql string
 	var values []string
 	sql += "delete from " + binlog.GetDbName() + "." + binlog.GetTableName() + " where 1=1 "
@@ -102,7 +102,7 @@ func genDeleteSQL(binlog pbinlog.Binlog) (string, string, []interface{}, error) 
 	return sql, binlog.GetTableName() + genPKey(binlog.GetPrimaryKey()), stringToInterface(values), nil
 }
 
-func genDdlSQL(binlog pbinlog.Binlog) (string, string, []interface{}, error) {
+func genDdlSQL(binlog *pbinlog.Binlog) (string, string, []interface{}, error) {
 	var sql string
 	if binlog.GetDbName() != "" {
 		sql += "use " + binlog.GetDbName() + ";"

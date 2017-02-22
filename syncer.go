@@ -275,73 +275,65 @@ func (s *Syncer) run() error {
 	go s.printStatus()
 
 	pos := s.meta.Pos()
-	s.syncer.SetCurrentPos(pos)
+	s.syncer.Start(pos)
 	for {
-		//ctx, cancel := context.WithTimeout(s.ctx, eventTimeout)
-		//binlogArg, pos, err := s.syncer.GetBinlogs(ctx)
-		//cancel()
-		//if err == context.Canceled {
-		//log.Infof("ready to quit! [%v]", pos)
-		//return nil
-		//} else if err == context.DeadlineExceeded {
-		//continue
-		//}
-		binlogAry, pos, err := s.syncer.GetBinlogs()
+		ctx, cancel := context.WithTimeout(s.ctx, eventTimeout)
+		binlog, pos, err := s.syncer.GetBinlogs(ctx)
+		cancel()
+		if err == context.Canceled {
+			log.Infof("ready to quit! [%v]", pos)
+			return nil
+		} else if err == context.DeadlineExceeded {
+			continue
+		}
 
 		if err != nil {
 			return errors.Trace(err)
 		}
 
-		if len(binlogAry) == 0 {
-			time.Sleep(10 * time.Second)
-			continue
-		}
-
-		for _, binlog := range binlogAry {
-			switch binlog.GetType() {
-			case pbinlog.BinlogType_INSERT:
-				sql, pKey, args, err := genInsertSQL(binlog)
-				if err != nil {
-					return errors.Errorf("gen insert sql failed: %v , DB: %s, table: %s", err, binlog.GetDbName(), binlog.GetTableName())
-				}
-				job := newJob(pbinlog.BinlogType_INSERT, sql, args, pKey, true, pos)
-				err = s.addJob(job)
-				if err != nil {
-					return errors.Trace(err)
-				}
-			case pbinlog.BinlogType_UPDATE:
-				sql, pKey, args, err := genUpdateSQL(binlog)
-				if err != nil {
-					return errors.Errorf("gen update sql failed: %v , DB: %s, table: %s", err, binlog.GetDbName(), binlog.GetTableName())
-				}
-				job := newJob(pbinlog.BinlogType_UPDATE, sql, args, pKey, true, pos)
-				err = s.addJob(job)
-				if err != nil {
-					return errors.Trace(err)
-				}
-			case pbinlog.BinlogType_DELETE:
-				sql, pKey, args, err := genDeleteSQL(binlog)
-				if err != nil {
-					return errors.Errorf("gen delete sql failed: %v , DB: %s, table: %s", err, binlog.GetDbName(), binlog.GetTableName())
-				}
-				job := newJob(pbinlog.BinlogType_DELETE, sql, args, pKey, true, pos)
-				err = s.addJob(job)
-				if err != nil {
-					return errors.Trace(err)
-				}
-			case pbinlog.BinlogType_DDL:
-				sql, pKey, args, err := genDdlSQL(binlog)
-				if err != nil {
-					return errors.Errorf("gen ddl sql failed: %v", err)
-				}
-				job := newJob(pbinlog.BinlogType_DDL, sql, args, pKey, true, pos)
-				err = s.addJob(job)
-				if err != nil {
-					return errors.Trace(err)
-				}
-			default:
-				break
+		switch binlog.GetType() {
+		case pbinlog.BinlogType_INSERT:
+			sql, pKey, args, err := genInsertSQL(binlog)
+			if err != nil {
+				return errors.Errorf("gen insert sql failed: %v , DB: %s, table: %s", err, binlog.GetDbName(), binlog.GetTableName())
 			}
+			job := newJob(pbinlog.BinlogType_INSERT, sql, args, pKey, true, pos)
+			err = s.addJob(job)
+			if err != nil {
+				return errors.Trace(err)
+			}
+		case pbinlog.BinlogType_UPDATE:
+			sql, pKey, args, err := genUpdateSQL(binlog)
+			if err != nil {
+				return errors.Errorf("gen update sql failed: %v , DB: %s, table: %s", err, binlog.GetDbName(), binlog.GetTableName())
+			}
+			job := newJob(pbinlog.BinlogType_UPDATE, sql, args, pKey, true, pos)
+			err = s.addJob(job)
+			if err != nil {
+				return errors.Trace(err)
+			}
+		case pbinlog.BinlogType_DELETE:
+			sql, pKey, args, err := genDeleteSQL(binlog)
+			if err != nil {
+				return errors.Errorf("gen delete sql failed: %v , DB: %s, table: %s", err, binlog.GetDbName(), binlog.GetTableName())
+			}
+			job := newJob(pbinlog.BinlogType_DELETE, sql, args, pKey, true, pos)
+			err = s.addJob(job)
+			if err != nil {
+				return errors.Trace(err)
+			}
+		case pbinlog.BinlogType_DDL:
+			sql, pKey, args, err := genDdlSQL(binlog)
+			if err != nil {
+				return errors.Errorf("gen ddl sql failed: %v", err)
+			}
+			job := newJob(pbinlog.BinlogType_DDL, sql, args, pKey, true, pos)
+			err = s.addJob(job)
+			if err != nil {
+				return errors.Trace(err)
+			}
+		default:
+			break
 		}
 	}
 }

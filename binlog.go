@@ -2,12 +2,14 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	pbinlog "github.com/cwen0/cdb-syncer/protocol"
 	"github.com/golang/protobuf/proto"
@@ -18,6 +20,9 @@ import (
 type BinlogSyncer struct {
 	cfg        *BinlogSyncerConfig
 	currentPos Position
+	ch         chan *pbinlog.Binlog
+	ech        chan error
+	err        error
 }
 
 type BinlogSyncerConfig struct {
@@ -33,108 +38,117 @@ func NewBinlogSyncer(cfg *BinlogSyncerConfig) *BinlogSyncer {
 		BinlogName: cfg.BinlogNamePre + string(fmt.Sprintf("%08d", 1)),
 		Pos:        uint64(1),
 	}
+	b.ch = make(chan *pbinlog.Binlog, 10240)
+	b.ech = make(chan error, 4)
 	return b
 }
 
-func (b *BinlogSyncer) SetCurrentPos(pos Position) {
+func (b *BinlogSyncer) Start(pos Position) {
+	b.setCurrentPos(pos)
+	go b.readFromFile()
+}
+
+func (b *BinlogSyncer) setCurrentPos(pos Position) {
 	if pos.BinlogName != "" {
 		b.currentPos.BinlogName = pos.BinlogName
 	}
 	b.currentPos.Pos = pos.Pos
 }
 
-func (b *BinlogSyncer) GetBinlogs() ([]pbinlog.Binlog, Position, error) {
-	var binlogAry []pbinlog.Binlog
-	var count int = 0
+func (b *BinlogSyncer) GetBinlogs(ctx context.Context) (*pbinlog.Binlog, Position, error) {
+	if b.err != nil {
+		return nil, b.currentPos, errors.Trace(b.err)
+	}
+	select {
+	case c := <-b.ch:
+		return c, b.currentPos, nil
+	case b.err = <-b.ech:
+		return nil, b.currentPos, errors.Trace(b.err)
+	case <-ctx.Done():
+		return nil, b.currentPos, ctx.Err()
+	}
+}
+
+func (b *BinlogSyncer) readFromFile() {
+	var file *os.File
 	var err error
 Loop:
-	var file *os.File
+	file, err = os.Open(b.cfg.BinlogPath + "/" + b.currentPos.BinlogName)
+	if err != nil {
+		b.ech <- errors.Trace(err)
+		return
+	}
+	defer file.Close()
+
+	fileInfo, err := file.Stat()
+	if err != nil {
+		b.ech <- errors.Trace(err)
+		return
+	}
 	for {
-		file, err = os.Open(b.cfg.BinlogPath + "/" + b.currentPos.BinlogName)
-		if err != nil {
-			return binlogAry, b.currentPos, errors.Trace(err)
-		}
-		defer file.Close()
-
-		fileInfo, err := file.Stat()
-		if err != nil {
-			return binlogAry, b.currentPos, errors.Trace(err)
-		}
-
 		if int64(b.currentPos.Pos) == fileInfo.Size() {
 			isExist, nextBinlogName, err := b.isExistNextBinlogName()
 			if err != nil {
-				return binlogAry, b.currentPos, errors.Trace(err)
+				b.ech <- errors.Trace(err)
+				return
 			}
 			if !isExist {
-				return binlogAry, b.currentPos, nil
-			}
-			file.Close()
-			b.currentPos.BinlogName = nextBinlogName
-			b.currentPos.Pos = 0
-			continue
-		} else if int64(b.currentPos.Pos) > fileInfo.Size() {
-			return binlogAry, b.currentPos, errors.Errorf("Read binlogfile %s offset %d error", b.currentPos.BinlogName, b.currentPos.Pos)
-		}
-		break
-	}
-
-	for i := count; i < 200; i++ {
-		sb := make([]byte, 8)
-		offset := b.currentPos.Pos
-		var fileIsEnd bool = false
-		var n int
-		n, err = file.ReadAt(sb, int64(offset))
-		if n == 0 {
-			return binlogAry, b.currentPos, nil
-		}
-		if err != nil || n != 8 {
-			return binlogAry, b.currentPos, errors.Trace(err)
-		}
-		var s int64
-		buf := bytes.NewReader(sb)
-		err := binary.Read(buf, binary.BigEndian, &s)
-		if err != nil {
-			return binlogAry, b.currentPos, errors.Trace(err)
-		}
-		data := make([]byte, s)
-		n, err = file.ReadAt(data, int64(offset+8))
-		if n != int(s) {
-			return binlogAry, b.currentPos, errors.Trace(err)
-		}
-		if err != nil {
-			if err != io.EOF {
-				return binlogAry, b.currentPos, errors.Trace(err)
-			}
-			fileIsEnd = true
-		}
-		binlog := pbinlog.Binlog{}
-		if err = proto.Unmarshal(data, &binlog); err != nil {
-			return binlogAry, b.currentPos, errors.Trace(err)
-		}
-		count++
-		b.currentPos.Pos = offset + 8 + uint64(s)
-		binlogAry = append(binlogAry, binlog)
-		if fileIsEnd {
-			isExist, nextBinlogName, err := b.isExistNextBinlogName()
-			if err != nil {
-				return binlogAry, b.currentPos, errors.Trace(err)
-			}
-			if !isExist {
-				return binlogAry, b.currentPos, nil
+				time.Sleep(10 * time.Second)
+				continue
 			}
 			file.Close()
 			b.currentPos.BinlogName = nextBinlogName
 			b.currentPos.Pos = 0
 			goto Loop
+		} else if int64(b.currentPos.Pos) > fileInfo.Size() {
+			b.ech <- errors.Errorf("Read binlogfile %s offset %d error", b.currentPos.BinlogName, b.currentPos.Pos)
+			return
 		}
+		break
 	}
-	return binlogAry, b.currentPos, nil
+
+	for {
+		sb := make([]byte, 8)
+		offset := b.currentPos.Pos
+		var n int
+		n, err = file.ReadAt(sb, int64(offset))
+		if n == 0 {
+			time.Sleep(10 * time.Second)
+			goto Loop
+		}
+		if err != nil || n != 8 {
+			b.ech <- errors.Trace(err)
+			return
+		}
+		var s int64
+		buf := bytes.NewReader(sb)
+		err := binary.Read(buf, binary.BigEndian, &s)
+		if err != nil {
+			b.ech <- errors.Trace(err)
+			return
+		}
+		data := make([]byte, s)
+		n, err = file.ReadAt(data, int64(offset+8))
+		if n != int(s) {
+			b.ech <- errors.Trace(err)
+			return
+		}
+		if err != nil {
+			if err != io.EOF {
+				b.ech <- errors.Trace(err)
+				return
+			}
+		}
+		binlog := &pbinlog.Binlog{}
+		if err = proto.Unmarshal(data, binlog); err != nil {
+			b.ech <- errors.Trace(err)
+			return
+		}
+		b.currentPos.Pos = offset + 8 + uint64(s)
+		b.ch <- binlog
+	}
+	return
 }
-
-//func (b *BinlogSyncer) readFromFile() {
-
-//}
 
 func (b *BinlogSyncer) isExistNextBinlogName() (bool, string, error) {
 	numStr := strings.TrimPrefix(b.currentPos.BinlogName, b.cfg.BinlogNamePre)
