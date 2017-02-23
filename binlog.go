@@ -93,7 +93,7 @@ Loop:
 				return
 			}
 			if !isExist {
-				time.Sleep(10 * time.Second)
+				time.Sleep(2 * time.Second)
 				continue
 			}
 			file.Close()
