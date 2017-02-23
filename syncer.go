@@ -300,7 +300,9 @@ func (s *Syncer) run() error {
 		if err != nil {
 			return errors.Trace(err)
 		}
-
+		if binlog == nil {
+			time.Sleep(2 * time.Second)
+		}
 		switch binlog.GetType() {
 		case pbinlog.BinlogType_INSERT:
 			sql, pKey, args, err := genInsertSQL(binlog)
