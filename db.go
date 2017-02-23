@@ -25,9 +25,11 @@ import (
 	"github.com/go-sql-driver/mysql"
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
+	"github.com/pingcap/tidb/ast"
 	tddl "github.com/pingcap/tidb/ddl"
 	"github.com/pingcap/tidb/infoschema"
 	tmysql "github.com/pingcap/tidb/mysql"
+	"github.com/pingcap/tidb/parser"
 	"github.com/pingcap/tidb/terror"
 )
 
@@ -102,17 +104,28 @@ func genDeleteSQL(binlog *pbinlog.Binlog) (string, string, []interface{}, error)
 	return sql, binlog.GetTableName() + genPKey(binlog.GetPrimaryKey()), stringToInterface(values), nil
 }
 
-func genDdlSQL(binlog *pbinlog.Binlog) (string, string, []interface{}, error) {
-	var sql string
-	if binlog.GetDbName() != "" {
-		sql += "use " + binlog.GetDbName() + ";"
-	}
+func genDdlSQL(binlog *pbinlog.Binlog) ([]string, string, []interface{}, error) {
+	var sqls []string
+	empty := make([]interface{}, 0)
 	rows := binlog.GetRows()
 	for _, row := range rows {
-		sql += row.GetSql() + ";"
+		tmpSqls, ok, err := resolveDDLSQL(row.GetSql())
+		if err != nil {
+			return sqls, "", empty, errors.Errorf("parse ddk sql: %v  failed: %v", row.GetSql(), err)
+		}
+		if !ok {
+			continue
+		}
+		for _, sql := range tmpSqls {
+			//var sql string
+			//if binlog.GetDbName() != "" {
+			//sql += "use " + binlog.GetDbName() + ";"
+			//}
+			//sql += s + ";"
+			sqls = append(sqls, sql)
+		}
 	}
-	empty := make([]interface{}, 0)
-	return sql, "", empty, nil
+	return sqls, "", empty, nil
 }
 
 func ignoreDDLError(err error) bool {
@@ -295,4 +308,75 @@ func closeDBs(dbs ...*sql.DB) {
 			log.Errorf("close db failed - %v", err)
 		}
 	}
+}
+
+func parserDDLTableName(sql string) (TableName, error) {
+	stmt, err := parser.New().ParseOneStmt(sql, "", "")
+	if err != nil {
+		return TableName{}, errors.Trace(err)
+	}
+
+	var res TableName
+	switch v := stmt.(type) {
+	case *ast.CreateDatabaseStmt:
+		res = genTableName(v.Name, "")
+	case *ast.DropDatabaseStmt:
+		res = genTableName(v.Name, "")
+	case *ast.CreateIndexStmt:
+		res = genTableName(v.Table.Schema.L, v.Table.Name.L)
+	case *ast.CreateTableStmt:
+		res = genTableName(v.Table.Schema.L, v.Table.Name.L)
+	case *ast.DropIndexStmt:
+		res = genTableName(v.Table.Schema.L, v.Table.Name.L)
+	case *ast.TruncateTableStmt:
+		res = genTableName(v.Table.Schema.L, v.Table.Name.L)
+	case *ast.DropTableStmt:
+		if len(v.Tables) != 1 {
+			return res, errors.Errorf("may resovle DDL sql failed")
+		}
+		res = genTableName(v.Tables[0].Schema.L, v.Tables[0].Name.L)
+	default:
+		return res, errors.Errorf("unkown DDL type")
+	}
+
+	return res, nil
+}
+
+func genTableName(schema string, table string) TableName {
+	return TableName{Schema: schema, Name: table}
+}
+
+// resolveDDLSQL resolve to one ddl sql
+// example: drop table test.a,test2.b -> drop table test.a; drop table test2.b;
+func resolveDDLSQL(sql string) (sqls []string, ok bool, err error) {
+	stmt, err := parser.New().ParseOneStmt(sql, "", "")
+	if err != nil {
+		log.Errorf("Parser SQL error: %s", sql)
+		return nil, false, errors.Trace(err)
+	}
+
+	_, isDDL := stmt.(ast.DDLNode)
+	if !isDDL {
+		sqls = append(sqls, sql)
+		return
+	}
+
+	switch v := stmt.(type) {
+	case *ast.DropTableStmt:
+		var ex string
+		if v.IfExists {
+			ex = "if exists"
+		}
+		for _, t := range v.Tables {
+			var db string
+			if t.Schema.O != "" {
+				db = fmt.Sprintf("`%s`.", t.Schema.O)
+			}
+			s := fmt.Sprintf("drop table %s %s`%s`", ex, db, t.Name.O)
+			sqls = append(sqls, s)
+		}
+	default:
+		sqls = append(sqls, sql)
+	}
+	return sqls, true, nil
 }

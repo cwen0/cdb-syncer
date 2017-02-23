@@ -15,6 +15,7 @@ package main
 
 import (
 	"database/sql"
+	"regexp"
 	"sync"
 	"time"
 
@@ -64,9 +65,9 @@ type Syncer struct {
 	deleteCount sync2.AtomicInt64
 	lastCount   sync2.AtomicInt64
 	count       sync2.AtomicInt64
-
-	ctx    context.Context
-	cancel context.CancelFunc
+	ctx         context.Context
+	cancel      context.CancelFunc
+	reMap       map[string]*regexp.Regexp
 }
 
 // NewSyncer creates a new Syncer.
@@ -82,6 +83,7 @@ func NewSyncer(cfg *Config) *Syncer {
 	syncer.deleteCount.Set(0)
 	syncer.done = make(chan struct{})
 	syncer.jobs = newJobChans(cfg.WorkerCount)
+	syncer.reMap = make(map[string]*regexp.Regexp)
 	syncer.ctx, syncer.cancel = context.WithCancel(context.Background())
 	return syncer
 }
@@ -270,6 +272,8 @@ func (s *Syncer) run() error {
 		return errors.Trace(err)
 	}
 
+	s.genRegexMap()
+
 	s.start = time.Now()
 	s.lastTime = s.start
 	s.wg.Add(s.cfg.WorkerCount)
@@ -303,6 +307,10 @@ func (s *Syncer) run() error {
 			if err != nil {
 				return errors.Errorf("gen insert sql failed: %v , DB: %s, table: %s", err, binlog.GetDbName(), binlog.GetTableName())
 			}
+			if s.skipRowEvent(sql, binlog.GetDbName()) {
+				log.Warnf("[skip query-sql]%s  [schema]:%s", sql, binlog.GetDbName())
+				continue
+			}
 			job := newJob(pbinlog.BinlogType_INSERT, sql, args, pKey, true, pos)
 			err = s.addJob(job)
 			if err != nil {
@@ -312,6 +320,10 @@ func (s *Syncer) run() error {
 			sql, pKey, args, err := genUpdateSQL(binlog)
 			if err != nil {
 				return errors.Errorf("gen update sql failed: %v , DB: %s, table: %s", err, binlog.GetDbName(), binlog.GetTableName())
+			}
+			if s.skipRowEvent(sql, binlog.GetDbName()) {
+				log.Warnf("[skip query-sql]%s  [schema]:%s", sql, binlog.GetDbName())
+				continue
 			}
 			job := newJob(pbinlog.BinlogType_UPDATE, sql, args, pKey, true, pos)
 			err = s.addJob(job)
@@ -323,20 +335,34 @@ func (s *Syncer) run() error {
 			if err != nil {
 				return errors.Errorf("gen delete sql failed: %v , DB: %s, table: %s", err, binlog.GetDbName(), binlog.GetTableName())
 			}
+			if s.skipRowEvent(sql, binlog.GetDbName()) {
+				log.Warnf("[skip query-sql]%s  [schema]:%s", sql, binlog.GetDbName())
+				continue
+			}
 			job := newJob(pbinlog.BinlogType_DELETE, sql, args, pKey, true, pos)
 			err = s.addJob(job)
 			if err != nil {
 				return errors.Trace(err)
 			}
 		case pbinlog.BinlogType_DDL:
-			sql, pKey, args, err := genDdlSQL(binlog)
+			sqls, pKey, args, err := genDdlSQL(binlog)
 			if err != nil {
 				return errors.Errorf("gen ddl sql failed: %v", err)
 			}
-			job := newJob(pbinlog.BinlogType_DDL, sql, args, pKey, true, pos)
-			err = s.addJob(job)
-			if err != nil {
-				return errors.Trace(err)
+			for _, sql := range sqls {
+				if s.skipRowEvent(sql, binlog.GetDbName()) {
+					log.Warnf("[skip query-sql]%s  [schema]:%s", sql, binlog.GetDbName())
+					continue
+				}
+				if s.skipQueryDDL(sql, binlog.GetDbName()) {
+					log.Warnf("[skip query-ddl-sql]%s  [schema]:%s", sql, binlog.GetDbName())
+					continue
+				}
+				job := newJob(pbinlog.BinlogType_DDL, sql, args, pKey, true, pos)
+				err = s.addJob(job)
+				if err != nil {
+					return errors.Trace(err)
+				}
 			}
 		default:
 			break
@@ -403,4 +429,50 @@ func (s *Syncer) Close() {
 	}
 
 	s.closed.Set(true)
+}
+
+func (s *Syncer) genRegexMap() {
+	for _, db := range s.cfg.DoDBs {
+		if db[0] != '~' {
+			continue
+		}
+		if _, ok := s.reMap[db]; !ok {
+			s.reMap[db] = regexp.MustCompile(db[1:])
+		}
+	}
+
+	for _, db := range s.cfg.IgnoreDBs {
+		if db[0] != '~' {
+			continue
+		}
+		if _, ok := s.reMap[db]; !ok {
+			s.reMap[db] = regexp.MustCompile(db[1:])
+		}
+	}
+
+	for _, tb := range s.cfg.DoTables {
+		if tb.Name[0] == '~' {
+			if _, ok := s.reMap[tb.Name]; !ok {
+				s.reMap[tb.Name] = regexp.MustCompile(tb.Name[1:])
+			}
+		}
+		if tb.Schema[0] == '~' {
+			if _, ok := s.reMap[tb.Schema]; !ok {
+				s.reMap[tb.Schema] = regexp.MustCompile(tb.Schema[1:])
+			}
+		}
+	}
+
+	for _, tb := range s.cfg.IgnoreTables {
+		if tb.Name[0] == '~' {
+			if _, ok := s.reMap[tb.Name]; !ok {
+				s.reMap[tb.Name] = regexp.MustCompile(tb.Name[1:])
+			}
+		}
+		if tb.Schema[0] == '~' {
+			if _, ok := s.reMap[tb.Schema]; !ok {
+				s.reMap[tb.Schema] = regexp.MustCompile(tb.Schema[1:])
+			}
+		}
+	}
 }
