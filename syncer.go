@@ -159,13 +159,6 @@ func (s *Syncer) addJob(job *job) error {
 	wait := s.checkWait(job)
 	if wait {
 		s.jobWg.Wait()
-		for _, ch := range s.jobs {
-			for {
-				if len(ch) == 0 {
-					break
-				}
-			}
-		}
 		err := s.meta.Save(job.pos, true)
 		if err != nil {
 			return errors.Trace(err)
@@ -357,6 +350,7 @@ func (s *Syncer) run() error {
 					log.Warnf("[skip query-ddl-sql]%s  [schema]:%s", sql, binlog.GetDbName())
 					continue
 				}
+				s.jobWg.Wait()
 				job := newJob(pbinlog.BinlogType_DDL, sql, args, pKey, false, pos)
 				err = s.addJob(job)
 				if err != nil {
