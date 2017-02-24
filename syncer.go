@@ -357,7 +357,7 @@ func (s *Syncer) run() error {
 					log.Warnf("[skip query-ddl-sql]%s  [schema]:%s", sql, binlog.GetDbName())
 					continue
 				}
-				job := newJob(pbinlog.BinlogType_DDL, sql, args, pKey, true, pos)
+				job := newJob(pbinlog.BinlogType_DDL, sql, args, pKey, false, pos)
 				err = s.addJob(job)
 				if err != nil {
 					return errors.Trace(err)

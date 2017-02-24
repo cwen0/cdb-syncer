@@ -53,15 +53,19 @@ func (s *Syncer) skipQueryEvent(sql string, schema string) bool {
 		return true
 	}
 
-	if strings.HasPrefix(sql, "GRANT REPLICATION SLAVE ON") {
-		return true
-	}
-
-	if strings.HasPrefix(sql, "GRANT ALL PRIVILEGES ON") {
+	if strings.HasPrefix(sql, "GRANT") {
 		return true
 	}
 
 	if strings.HasPrefix(sql, "FLUSH PRIVILEGES") {
+		return true
+	}
+
+	if strings.HasPrefix(sql, "ALTER USER") {
+		return true
+	}
+
+	if strings.HasPrefix(sql, "DROP USER") {
 		return true
 	}
 
