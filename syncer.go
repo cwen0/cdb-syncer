@@ -293,6 +293,10 @@ func (s *Syncer) run() error {
 		if err != nil {
 			return errors.Trace(err)
 		}
+		if len(binlog.GetRows()) <= 0 {
+			log.Warnf("[skip binlog]%v :rows size is zero", binlog)
+			continue
+		}
 		switch binlog.GetType() {
 		case pbinlog.BinlogType_INSERT:
 			sql, pKey, args, err := genInsertSQL(binlog)
